@@ -117,6 +117,37 @@ async function main(): Promise<void> {
 		});
 	});
 
+	// WebSocket keepalive. Railway's edge proxy closes idle WebSocket connections
+	// after ~45s. skyware's subscribeLabels sends no ping frames, so once the AppView
+	// ingester (Vortex) has received the label backlog the connection goes idle and
+	// Railway kills it at 45s — Vortex reconnects, gets the backlog, idles, dies, on
+	// a loop, and never stabilizes enough to ingest. Pinging every live subscriber
+	// keeps the connection alive past the idle timeout. (Confirmed in Vortex's logs:
+	// connect → 101 → close 1006 at exactly 45s.)
+	const KEEPALIVE_MS = 30_000;
+	// `connections` is typed private but is a real instance field skyware populates.
+	const connections = (server as unknown as {
+		connections: Map<string, Set<unknown>>;
+	}).connections;
+	const keepalive = setInterval(() => {
+		const subs = connections.get("com.atproto.label.subscribeLabels");
+		if (!subs || subs.size === 0) return;
+		let pinged = 0;
+		for (const ws of subs) {
+			const sock = ws as unknown as { readyState: number; ping?: () => void };
+			if (sock.readyState === 1 && typeof sock.ping === "function") {
+				try {
+					sock.ping();
+					pinged++;
+				} catch {
+					/* ignore; close handler will evict it */
+				}
+			}
+		}
+		if (pinged > 0) log("keepalive ping", { subscribers: pinged });
+	}, KEEPALIVE_MS);
+	keepalive.unref?.();
+
 	// REEMIT_LABELS: one-shot repair. Labels written by the backfill (a separate
 	// process) never broadcast live on the AppView ingester's open connection, so
 	// if its resume cursor sits at/past them they never get ingested. Re-emitting
