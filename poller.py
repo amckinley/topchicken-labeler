@@ -145,14 +145,19 @@ def build_state(token):
 
 
 def add_label(uri, val, neg=False, cid=None):
+    # The bsky-watch admin API returns a plain-text body ("OK"), not JSON, so we
+    # read only the status code (201 = newly created, 200 = already present/no-op).
     body = {"uri": uri, "val": val}
     if neg:
         body["neg"] = True
     if cid:
         body["cid"] = cid
     try:
-        _, status = _req(ADMIN, method="POST", body=body)
-        return status
+        req = urllib.request.Request(
+            ADMIN, data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status
     except Exception as e:
         print(f"  ! label failed {val} {uri[:30]}: {e}", flush=True)
         return None
