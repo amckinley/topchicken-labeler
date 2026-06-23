@@ -7,7 +7,7 @@
  * with the state file / alumni set to avoid noise).
  */
 import { LabelerServer } from "@skyware/labeler";
-import { LABEL_CURRENT, LABEL_ALUMNI } from "./config.js";
+import { LABEL_CURRENT, LABEL_ALUMNI, LABEL_GRANDMASTER } from "./config.js";
 
 /**
  * Move the `top-chicken` crown to `newHolderDid`, negating it off `oldHolderDid`
@@ -50,4 +50,36 @@ export async function grantAlumni(server: LabelerServer, did: string): Promise<v
 /** Negate the `top-chicken` crown off a DID (no-op-safe if it wasn't set). */
 export async function negateCurrent(server: LabelerServer, did: string): Promise<void> {
 	await server.createLabels({ uri: did }, { negate: [LABEL_CURRENT] });
+}
+
+/** Negate the `tiptop-chicken` record crown off a DID (no-op-safe if unset). */
+export async function negateGrandmaster(server: LabelerServer, did: string): Promise<void> {
+	await server.createLabels({ uri: did }, { negate: [LABEL_GRANDMASTER] });
+}
+
+/**
+ * Move the single all-time-record `tiptop-chicken` (TipTop Chicken) crown to
+ * `newHolderDid`, negating it off `oldHolderDid` if different. Like the daily
+ * crown this is single-holder, but it only changes hands when a record is broken.
+ */
+export async function transferGrandmaster(
+	server: LabelerServer,
+	oldHolderDid: string | null,
+	newHolderDid: string,
+): Promise<{ negated: string[]; created: string[] }> {
+	const negated: string[] = [];
+	const created: string[] = [];
+	if (oldHolderDid === newHolderDid) {
+		// Same DID broke its own record: the visible holder doesn't change, so skip
+		// the redundant create (the label log is append-only — re-emitting would just
+		// add noise clients dedupe away). Mirrors the daily crown's same-holder guard.
+		return { negated, created };
+	}
+	if (oldHolderDid) {
+		await server.createLabels({ uri: oldHolderDid }, { negate: [LABEL_GRANDMASTER] });
+		negated.push(`${LABEL_GRANDMASTER}@${oldHolderDid}`);
+	}
+	await server.createLabels({ uri: newHolderDid }, { create: [LABEL_GRANDMASTER] });
+	created.push(`${LABEL_GRANDMASTER}@${newHolderDid}`);
+	return { negated, created };
 }

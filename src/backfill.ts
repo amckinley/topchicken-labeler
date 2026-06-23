@@ -17,7 +17,13 @@ import { AtpAgent } from "@atproto/api";
 import { LabelerServer } from "@skyware/labeler";
 import { loadEnv } from "./config.js";
 import { buildHistory } from "./crownings.js";
-import { transferCrown, grantAlumni, negateCurrent } from "./labeler.js";
+import {
+	transferCrown,
+	grantAlumni,
+	negateCurrent,
+	transferGrandmaster,
+	negateGrandmaster,
+} from "./labeler.js";
 import { writeState } from "./state.js";
 
 async function main(): Promise<void> {
@@ -63,10 +69,22 @@ async function main(): Promise<void> {
 	const { created } = await transferCrown(server, null, current.did);
 	console.log(`current crown -> @${current.handle} (${current.did}): ${created.join(", ")}`);
 
-	// 3. Seed the holder state so the poller continues from here without re-acting.
+	// 3. Repair the single all-time-record `tiptop-chicken` crown the same way:
+	//    negate it off every non-record holder, then crown the record holder.
+	const record = history.recordHolder;
+	if (!record) throw new Error("no record holder derived; aborting");
+	for (const did of history.alumni.keys()) {
+		if (did !== record.did) await negateGrandmaster(server, did);
+	}
+	const gm = await transferGrandmaster(server, null, record.did);
+	console.log(`tiptop crown -> @${record.handle} (${record.did}, ${record.bestLikes}): ${gm.created.join(", ")}`);
+
+	// 4. Seed the holder state so the poller continues from here without re-acting.
 	await writeState(env.statePath, {
 		currentHolderDid: current.did,
 		currentSince: current.ts,
+		recordHolderDid: record.did,
+		recordScore: record.bestLikes,
 	});
 
 	console.log("backfill complete.");

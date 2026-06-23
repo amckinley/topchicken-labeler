@@ -5,13 +5,14 @@
  *   1. Run a LabelerServer (com.atproto.label.queryLabels + subscribeLabels) that
  *      serves and signs labels, persisting them to SQLite on the mounted volume.
  *   2. Poll the canonical @topchicken.bsky.social feed; when the crown moves,
- *      transfer the `top-chicken` label and grant `top-chicken-alumni`.
+ *      transfer the `top-chicken` label and grant `top-chicken-alumni`, and when
+ *      a new all-time record is set, move the `tiptop-chicken` (TipTop) crown.
  */
 import { AtpAgent } from "@atproto/api";
 import { LabelerServer } from "@skyware/labeler";
 import { loadEnv, BOT_HANDLE, type Env } from "./config.js";
 import { fetchLatestCrowning } from "./crownings.js";
-import { transferCrown } from "./labeler.js";
+import { transferCrown, transferGrandmaster } from "./labeler.js";
 import { readState, writeState } from "./state.js";
 
 function log(msg: string, extra?: Record<string, unknown>): void {
@@ -40,31 +41,61 @@ async function pollOnce(env: Env, agent: AtpAgent, server: LabelerServer): Promi
 	}
 
 	const state = await readState(env.statePath);
-	// Dedupe on DID only, intentionally: the crown is a single label that only
-	// needs to move when the *holder* changes. A same-holder re-coronation (the
-	// same DID winning two days running) leaves them already wearing `top-chicken`,
-	// so re-emitting it would just append a redundant entry to the label log for no
-	// user-visible change. (transferCrown's same-holder path exists for backfill /
-	// recovery, where the label DB may not reflect reality — not for this hot path.)
-	if (state.currentHolderDid === latest.did) {
+	const next = { ...state };
+	let acted = false;
+
+	// 1. Daily crown. Dedupe on DID only, intentionally: the crown is a single
+	//    label that only needs to move when the *holder* changes. A same-holder
+	//    re-coronation (same DID winning two days running) leaves them already
+	//    wearing `top-chicken`, so re-emitting it would just append a redundant
+	//    entry to the log for no user-visible change. (transferCrown's same-holder
+	//    path exists for backfill/recovery, not this hot path.)
+	if (state.currentHolderDid !== latest.did) {
+		log("poll: crown moved", {
+			from: state.currentHolderDid,
+			to: latest.did,
+			handle: latest.handle,
+			likes: latest.likes,
+		});
+		const { negated, created } = await transferCrown(server, state.currentHolderDid, latest.did);
+		log("labels updated", { negated, created });
+		next.currentHolderDid = latest.did;
+		next.currentSince = latest.ts;
+		acted = true;
+	}
+
+	// 2. All-time record (TipTop Chicken). Independent of the daily dedupe: the
+	//    record can be broken even by the same DID re-crowned with a higher score.
+	//    Strictly-greater so a tie doesn't dethrone the existing record holder.
+	//
+	//    Seeding the record is the backfill's job, not the poller's: it requires the
+	//    *full* history to know the true all-time max. If recordScore is null here
+	//    (fresh DB, or an old pre-record state file that readState filled with null),
+	//    we must NOT treat the latest single crowning as the record — that would
+	//    crown a non-record post and persist a too-low score. Skip until a backfill
+	//    has seeded it, and say so loudly.
+	if (state.recordScore === null) {
+		log("poll: record state unseeded; run backfill to set the TipTop crown — skipping record check");
+	} else if (latest.likes > state.recordScore) {
+		log("poll: new all-time record", {
+			from: state.recordHolderDid,
+			to: latest.did,
+			handle: latest.handle,
+			likes: latest.likes,
+			previousRecord: state.recordScore,
+		});
+		const { negated, created } = await transferGrandmaster(server, state.recordHolderDid, latest.did);
+		log("grandmaster updated", { negated, created });
+		next.recordHolderDid = latest.did;
+		next.recordScore = latest.likes;
+		acted = true;
+	}
+
+	if (!acted) {
 		log("poll: no change", { holder: latest.handle, did: latest.did });
 		return;
 	}
-
-	log("poll: crown moved", {
-		from: state.currentHolderDid,
-		to: latest.did,
-		handle: latest.handle,
-		likes: latest.likes,
-	});
-
-	const { negated, created } = await transferCrown(server, state.currentHolderDid, latest.did);
-	log("labels updated", { negated, created });
-
-	await writeState(env.statePath, {
-		currentHolderDid: latest.did,
-		currentSince: latest.ts,
-	});
+	await writeState(env.statePath, next);
 }
 
 async function main(): Promise<void> {

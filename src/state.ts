@@ -14,9 +14,18 @@ export interface HolderState {
 	currentHolderDid: string | null;
 	/** Informational: timestamp of the crowning that put this holder on the throne. */
 	currentSince: string | null;
+	/** DID of the all-time record holder (gm-grandmaster). */
+	recordHolderDid: string | null;
+	/** The all-time record score — a new crowning must strictly beat this to take it. */
+	recordScore: number | null;
 }
 
-const EMPTY: HolderState = { currentHolderDid: null, currentSince: null };
+const EMPTY: HolderState = {
+	currentHolderDid: null,
+	currentSince: null,
+	recordHolderDid: null,
+	recordScore: null,
+};
 
 export async function readState(path: string): Promise<HolderState> {
 	try {

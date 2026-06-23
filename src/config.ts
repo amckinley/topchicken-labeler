@@ -26,6 +26,8 @@ export const BOT_HANDLE = "topchicken.bsky.social";
 /** Label values this labeller emits. Must match the declared definitions. */
 export const LABEL_CURRENT = "top-chicken";
 export const LABEL_ALUMNI = "top-chicken-alumni";
+/** Single-holder: the account with the highest all-time crowning score ever. */
+export const LABEL_GRANDMASTER = "tiptop-chicken";
 
 export interface Env {
 	/** DID of the labeler account (e.g. did:plc:...). */

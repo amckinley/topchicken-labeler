@@ -34,6 +34,12 @@ export interface CrowningHistory {
 	alumni: Map<string, { handle: string; bestLikes: number }>;
 	/** The current (most recent) holder, or null if none found. */
 	current: Crowning | null;
+	/**
+	 * The all-time record holder: the DID with the highest single-crowning score
+	 * ever. Ties break toward the *earliest* to set that score (first to the peak
+	 * keeps the title until strictly beaten), matching the bot's "to beat" framing.
+	 */
+	recordHolder: { did: string; handle: string; bestLikes: number } | null;
 }
 
 /**
@@ -139,10 +145,22 @@ export function summarize(raw: Crowning[]): CrowningHistory {
 		}
 	}
 
+	// All-time record holder: highest single-crowning score. `crownings` is sorted
+	// oldest-first, so a strict `>` comparison naturally keeps the *first* DID to
+	// reach a given peak — the record only changes hands when someone strictly
+	// beats it, matching the bot's "score to beat" framing.
+	let recordHolder: CrowningHistory["recordHolder"] = null;
+	for (const c of crownings) {
+		if (!recordHolder || c.likes > recordHolder.bestLikes) {
+			recordHolder = { did: c.did, handle: c.handle, bestLikes: c.likes };
+		}
+	}
+
 	return {
 		crownings,
 		alumni,
 		current: crownings.at(-1) ?? null,
+		recordHolder,
 	};
 }
 

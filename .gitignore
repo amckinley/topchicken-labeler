@@ -8,3 +8,9 @@ data/
 state.json
 .env
 .env.*
+
+# local secrets / one-off setup artifacts — never commit
+setup.key
+setup.err
+setup-plc.mjs
+*.key
