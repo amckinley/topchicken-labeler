@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "postinstall": "patch-package",
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
@@ -17,7 +18,8 @@
   },
   "dependencies": {
     "@atproto/api": "^0.20.18",
-    "@skyware/labeler": "^0.2.0"
+    "@skyware/labeler": "0.2.0",
+    "patch-package": "^8.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.19.4",
