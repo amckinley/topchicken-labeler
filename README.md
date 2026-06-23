@@ -1,7 +1,41 @@
 # Top Chicken Labeller 🐔
 
-A Bluesky labeller that badges the reigning **Top Chicken** and everyone who's
-ever held the crown.
+A Bluesky labeller that badges the reigning **Top Chicken**, the all-time record
+holder (**TipTop Chicken**), and everyone who's ever held the crown.
+
+## Labels not showing up? (AppView ingestion / Vortex)
+
+The Bluesky AppView ingests third-party labels via an internal service (**Vortex**)
+that opens a `subscribeLabels` websocket per labeler and keeps a **per-labeler
+resume cursor**. Two consequences bite this project:
+
+- **Backfill labels can be stranded.** The backfill runs as a *separate process*
+  from the running server, so its `createLabels` writes rows to the DB but never
+  broadcast live on Vortex's open connection. If Vortex's cursor is at/past them,
+  they're never ingested. Fix: set `REEMIT_LABELS=1` and redeploy once — the
+  *running* server re-emits the current effective active set as fresh higher-seq
+  rows that broadcast live (and sit above any cursor). Then unset it (otherwise it
+  re-emits on every boot). This is the fix Bluesky's own labeler ops prescribe
+  ("re-emit the labels and advance the cursor").
+- **A brand-new labeler may take a while to be picked up at all.** Vortex
+  discovers labelers from the AppView's indexed `app.bsky.labeler.service` record
+  and reloads them (notably on its own restart). Until Vortex opens a connection,
+  nothing we emit is ingested — labels are correct and served by our `queryLabels`
+  but simply don't appear on profiles yet. There is no self-service way to force
+  this from outside; cursor surgery is Bluesky-internal. Verify our side is
+  correct (below) and wait, or ask a Bluesky engineer to kick Vortex.
+
+Verify our side is healthy independent of the AppView:
+
+```bash
+# labeler declared + indexed:
+curl "https://api.bsky.app/xrpc/app.bsky.labeler.getServices?dids=<LABELER_DID>&detailed=true"
+# labels actually served + signed:
+curl "https://<host>/xrpc/com.atproto.label.queryLabels?uriPatterns=<subject-did>"
+```
+
+If those return the labels but a profile (with `atproto-accept-labelers: <did>`)
+doesn't, the gap is Vortex ingestion, not this service.
 
 ## What's a Top Chicken?
 
