@@ -6,7 +6,7 @@
   },
   "deploy": {
     "numReplicas": 1,
-    "healthcheckPath": "/xrpc/_health",
+    "healthcheckPath": "/xrpc/com.atproto.label.queryLabels?uriPatterns=did:plc:healthcheck",
     "healthcheckTimeout": 60,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10

@@ -1,0 +1,53 @@
+# bsky-watch/labeler config, rendered at container start from env vars by
+# entrypoint.sh (so the signing key / password never live in the repo).
+# Placeholders __VAR__ are substituted from the environment.
+
+sqlite_db: __DB_PATH__
+
+private_key: "__SIGNING_KEY__"
+
+did: __LABELER_DID__
+
+# Password enables the labeler to publish/refresh its label definitions on the
+# account at startup (handles the "declare" step for us).
+password: "__BSKY_APP_PASSWORD__"
+endpoint: __LABELER_ENDPOINT__
+
+labels:
+  labelvaluedefinitions:
+    - identifier: top-chicken
+      severity: inform
+      blurs: none
+      defaultsetting: warn
+      adultonly: false
+      locales:
+        - lang: en
+          name: "Top Chicken \U0001F414"
+          description: "The reigning Top Chicken: today's most-liked post from an account under the 7,000-follower Grace Limit. The crown moves daily."
+    - identifier: top-chicken-alumni
+      severity: inform
+      blurs: none
+      defaultsetting: warn
+      adultonly: false
+      locales:
+        - lang: en
+          name: "Top Chicken Alum"
+          description: "Has held the Top Chicken crown at least once. Once a chicken, always a chicken."
+    - identifier: tiptop-chicken
+      severity: inform
+      blurs: none
+      defaultsetting: warn
+      adultonly: false
+      locales:
+        - lang: en
+          name: "TipTop Chicken \U0001F451"
+          description: "Holder of the highest all-time Top Chicken score — the single most-liked crowning ever. Moves only when the record is broken."
+    - identifier: top-chicken-post
+      severity: inform
+      blurs: none
+      defaultsetting: warn
+      adultonly: false
+      locales:
+        - lang: en
+          name: "Top Chicken Post \U0001F947"
+          description: "This is the post that won the Top Chicken crown for the day — the most-liked post in its 24h window."

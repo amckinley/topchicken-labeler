@@ -1,16 +1,11 @@
-node_modules/
-dist/
 data/
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-state.json
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.bolt
+config.yaml
 .env
 .env.*
-
-# local secrets / one-off setup artifacts — never commit
 setup.key
-setup.err
-setup-plc.mjs
 *.key
