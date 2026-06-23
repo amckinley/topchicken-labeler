@@ -4,8 +4,10 @@ FROM node:20-slim
 WORKDIR /app
 
 # Install deps first for layer caching. @libsql/client ships prebuilt binaries,
-# so no native toolchain is needed.
+# so no native toolchain is needed. Copy patches/ BEFORE `npm ci` so the
+# postinstall `patch-package` step finds them (it runs during npm ci).
 COPY package.json package-lock.json* ./
+COPY patches ./patches
 RUN npm ci
 
 COPY tsconfig.json ./
