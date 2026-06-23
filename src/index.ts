@@ -109,6 +109,25 @@ async function main(): Promise<void> {
 
 	const server = new LabelerServer({ did: env.labelerDid, signingKey: env.signingKey, dbPath: env.dbPath });
 
+	// IGNORE_SEQUENCE: force subscribeLabels to replay from cursor 0 regardless of
+	// the cursor the consumer sends. The AppView tracks a per-labeler cursor; if it
+	// ever advances past labels it didn't actually persist (e.g. labels written by a
+	// separate backfill process that never live-emitted on the AppView's connection),
+	// those labels are stranded — a normal reconnect replays only `id > cursor` and
+	// skips them. Rewriting the cursor to 0 on connect makes the next reconnect
+	// re-ingest the full label set. Flip this on to repair sync, then turn it off.
+	// (skyware's handler reads req.query.cursor, so an onRequest hook can rewrite it.)
+	if (process.env.IGNORE_SEQUENCE) {
+		server.app.addHook("onRequest", (req, _reply, done) => {
+			if (req.url.includes("com.atproto.label.subscribeLabels")) {
+				const q = req.query as Record<string, unknown>;
+				log("IGNORE_SEQUENCE: forcing subscribeLabels cursor to 0", { from: q.cursor });
+				q.cursor = "0";
+			}
+			done();
+		});
+	}
+
 	await new Promise<void>((resolve, reject) => {
 		server.start({ port: env.port, host: "0.0.0.0" }, (err, address) => {
 			if (err) return reject(err);
