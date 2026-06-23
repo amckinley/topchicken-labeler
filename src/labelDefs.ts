@@ -6,7 +6,7 @@
  * app.bsky.labeler.service record so the labels render with names/descriptions
  * in clients instead of as raw label values.
  */
-import { LABEL_CURRENT, LABEL_ALUMNI, LABEL_GRANDMASTER } from "./config.js";
+import { LABEL_CURRENT, LABEL_ALUMNI, LABEL_GRANDMASTER, LABEL_WINNING_POST } from "./config.js";
 
 // The shape matches ComAtprotoLabelDefs.LabelValueDefinition.
 export const LABEL_DEFINITIONS = [
@@ -56,6 +56,21 @@ export const LABEL_DEFINITIONS = [
 				name: "TipTop Chicken 👑",
 				description:
 					"Holder of the highest all-time Top Chicken score — the single most-liked crowning ever. Moves only when the record is broken.",
+			},
+		],
+	},
+	{
+		identifier: LABEL_WINNING_POST,
+		severity: "inform",
+		blurs: "none",
+		defaultSetting: "warn",
+		adultOnly: false,
+		locales: [
+			{
+				lang: "en",
+				name: "Top Chicken Post 🥇",
+				description:
+					"This is the post that won the Top Chicken crown for the day — the most-liked post in its 24h window.",
 			},
 		],
 	},

@@ -25,6 +25,10 @@ export interface Crowning {
 	source: string;
 	/** AT-URI of the announcement post itself. */
 	announceUri: string;
+	/** AT-URI of the winning post (from the announcement's quote embed), if present. */
+	postUri?: string;
+	/** CID of the winning post, to pin the record-level label to that version. */
+	postCid?: string;
 }
 
 export interface CrowningHistory {
@@ -66,6 +70,19 @@ function winnerMentionDid(record: AppBskyFeedPost.Record, handle: string): strin
 	return firstMention;
 }
 
+/**
+ * Pull the winning post's strongRef (uri + cid) from the announcement's quote
+ * embed. The announcers quote-embed the actual winning post via
+ * app.bsky.embed.record, so we get an exact, version-pinned reference for free.
+ */
+function winningPostRef(record: AppBskyFeedPost.Record): { uri?: string; cid?: string } {
+	const embed = record.embed as { $type?: string; record?: { uri?: string; cid?: string } } | undefined;
+	if (embed?.$type === "app.bsky.embed.record" && embed.record?.uri) {
+		return { uri: embed.record.uri, cid: embed.record.cid };
+	}
+	return {};
+}
+
 async function fetchAuthorFeed(
 	agent: AtpAgent,
 	actor: string,
@@ -101,6 +118,7 @@ export function parseCrownings(
 		if (!m) continue;
 		const did = winnerMentionDid(record, m[1]);
 		if (!did) continue; // no mention facet -> can't resolve a subject safely; skip.
+		const { uri: postUri, cid: postCid } = winningPostRef(record);
 		crownings.push({
 			ts: (record.createdAt ?? "").slice(0, 19),
 			handle: m[1],
@@ -108,6 +126,8 @@ export function parseCrownings(
 			likes: Number(m[2].replace(/,/g, "")),
 			source,
 			announceUri: item.post.uri,
+			...(postUri ? { postUri } : {}),
+			...(postCid ? { postCid } : {}),
 		});
 	}
 	return crownings;

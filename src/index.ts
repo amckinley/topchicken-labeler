@@ -10,8 +10,8 @@
  */
 import { AtpAgent } from "@atproto/api";
 import { LabelerServer } from "@skyware/labeler";
-import { loadEnv, BOT_HANDLE, type Env } from "./config.js";
-import { fetchLatestCrowning } from "./crownings.js";
+import { loadEnv, BOT_HANDLE, LABEL_WINNING_POST, type Env } from "./config.js";
+import { buildHistory, fetchLatestCrowning } from "./crownings.js";
 import { transferCrown, transferGrandmaster, reemitActiveLabels } from "./labeler.js";
 import { readState, writeState } from "./state.js";
 
@@ -165,6 +165,31 @@ async function main(): Promise<void> {
 	}
 
 	const agent = await makeAgent(env);
+
+	// LABEL_WINNING_POSTS=N: one-shot. Emit record-level `top-chicken-post` labels
+	// on the N most recent winning posts (AT-URIs pulled from the announcers' quote
+	// embeds), live from the running server. Doubles as a probe: if these appear in
+	// the AppView, Vortex is fully consuming our live output. Set, deploy once, then
+	// unset.
+	const winN = Number(process.env.LABEL_WINNING_POSTS ?? 0);
+	if (winN > 0) {
+		try {
+			const history = await buildHistory(agent);
+			const withPosts = history.crownings.filter((c) => c.postUri).slice(-winN);
+			let n = 0;
+			for (const c of withPosts) {
+				await server.createLabels(
+					{ uri: c.postUri!, ...(c.postCid ? { cid: c.postCid } : {}) },
+					{ create: [LABEL_WINNING_POST] },
+				);
+				n++;
+				log("labeled winning post", { handle: c.handle, uri: c.postUri, likes: c.likes });
+			}
+			log("LABEL_WINNING_POSTS: done", { labeled: n });
+		} catch (err) {
+			log("LABEL_WINNING_POSTS error", { error: err instanceof Error ? err.message : String(err) });
+		}
+	}
 
 	// Run an initial poll immediately, then on the configured interval. Poll
 	// failures are logged but never crash the loop (the label server keeps serving).
