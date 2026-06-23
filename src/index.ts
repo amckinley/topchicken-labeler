@@ -12,7 +12,7 @@ import { AtpAgent } from "@atproto/api";
 import { LabelerServer } from "@skyware/labeler";
 import { loadEnv, BOT_HANDLE, type Env } from "./config.js";
 import { fetchLatestCrowning } from "./crownings.js";
-import { transferCrown, transferGrandmaster } from "./labeler.js";
+import { transferCrown, transferGrandmaster, reemitActiveLabels } from "./labeler.js";
 import { readState, writeState } from "./state.js";
 
 function log(msg: string, extra?: Record<string, unknown>): void {
@@ -109,25 +109,6 @@ async function main(): Promise<void> {
 
 	const server = new LabelerServer({ did: env.labelerDid, signingKey: env.signingKey, dbPath: env.dbPath });
 
-	// IGNORE_SEQUENCE: force subscribeLabels to replay from cursor 0 regardless of
-	// the cursor the consumer sends. The AppView tracks a per-labeler cursor; if it
-	// ever advances past labels it didn't actually persist (e.g. labels written by a
-	// separate backfill process that never live-emitted on the AppView's connection),
-	// those labels are stranded — a normal reconnect replays only `id > cursor` and
-	// skips them. Rewriting the cursor to 0 on connect makes the next reconnect
-	// re-ingest the full label set. Flip this on to repair sync, then turn it off.
-	// (skyware's handler reads req.query.cursor, so an onRequest hook can rewrite it.)
-	if (process.env.IGNORE_SEQUENCE) {
-		server.app.addHook("onRequest", (req, _reply, done) => {
-			if (req.url.includes("com.atproto.label.subscribeLabels")) {
-				const q = req.query as Record<string, unknown>;
-				log("IGNORE_SEQUENCE: forcing subscribeLabels cursor to 0", { from: q.cursor });
-				q.cursor = "0";
-			}
-			done();
-		});
-	}
-
 	await new Promise<void>((resolve, reject) => {
 		server.start({ port: env.port, host: "0.0.0.0" }, (err, address) => {
 			if (err) return reject(err);
@@ -135,6 +116,22 @@ async function main(): Promise<void> {
 			resolve();
 		});
 	});
+
+	// REEMIT_LABELS: one-shot repair. Labels written by the backfill (a separate
+	// process) never broadcast live on the AppView ingester's open connection, so
+	// if its resume cursor sits at/past them they never get ingested. Re-emitting
+	// from the running server appends fresh higher-seq rows that broadcast live and
+	// sit above any cursor — the fix Bluesky's labeler ops prescribe. Set the env
+	// var, deploy once, confirm labels appear, then unset it (leaving it on just
+	// re-emits the same active set on every boot — harmless but noisy).
+	if (process.env.REEMIT_LABELS) {
+		try {
+			const n = await reemitActiveLabels(server);
+			log("REEMIT_LABELS: re-emitted active label set from running server", { count: n });
+		} catch (err) {
+			log("REEMIT_LABELS error", { error: err instanceof Error ? err.message : String(err) });
+		}
+	}
 
 	const agent = await makeAgent(env);
 
