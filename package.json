@@ -1,0 +1,27 @@
+{
+  "name": "topchicken-labeler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Bluesky labeller that badges the reigning Top Chicken and all-time alumni.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "backfill": "node dist/backfill.js",
+    "backfill:dev": "tsx src/backfill.ts",
+    "declare": "tsx src/declare.ts"
+  },
+  "dependencies": {
+    "@atproto/api": "^0.20.18",
+    "@skyware/labeler": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.4",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
