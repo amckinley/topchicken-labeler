@@ -163,26 +163,35 @@ def add_label(uri, val, neg=False, cid=None):
         return None
 
 
+ACCOUNT_LABELS = (L_RECORD, L_CURRENT, L_ALUMNI)
+
+
+def desired_account_label(did, state):
+    """The single account-level label a DID should carry, by priority:
+    tiptop-chicken (all-time record) > top-chicken (current daily) > top-chicken-alumni.
+    One badge per account: the record holder shows only 👑, the current holder only 🐔,
+    everyone else who's ever held it shows the alum badge."""
+    if did == state["record"]:
+        return L_RECORD
+    if did == state["current"]:
+        return L_CURRENT
+    return L_ALUMNI
+
+
 def reconcile(state):
-    """Assert the full desired label state. Idempotent — re-POSTing is a no-op."""
+    """Assert the full desired label state. Each account carries exactly one
+    account-level label (highest priority); the other two are negated. Idempotent —
+    re-POSTing an unchanged label is a no-op."""
     n_new = 0
-    # Alumni: sticky, everyone who ever held it.
+    # Account labels: one per account, negate the rest.
     for did in state["alumni"]:
-        if add_label(did, L_ALUMNI) == 201:
+        want = desired_account_label(did, state)
+        if add_label(did, want) == 201:
             n_new += 1
-    # Current crown: negate off everyone who isn't current, set on current.
-    for did in state["alumni"]:
-        if did != state["current"]:
-            add_label(did, L_CURRENT, neg=True)
-    if add_label(state["current"], L_CURRENT) == 201:
-        n_new += 1
-    # Record (TipTop): negate off non-record holders, set on record holder.
-    for did in state["alumni"]:
-        if did != state["record"]:
-            add_label(did, L_RECORD, neg=True)
-    if add_label(state["record"], L_RECORD) == 201:
-        n_new += 1
-    # Winning posts: record-level, sticky.
+        for other in ACCOUNT_LABELS:
+            if other != want:
+                add_label(did, other, neg=True)
+    # Winning posts: record-level, sticky, independent of account labels.
     for uri, cid in state["winning_posts"]:
         if add_label(uri, L_POST, cid=cid) == 201:
             n_new += 1
