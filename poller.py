@@ -23,6 +23,8 @@ import time
 import urllib.request
 import urllib.parse
 
+import starterpack
+
 BOT_HANDLES = ["dave.9000ish.uk", "topchicken.bsky.social"]
 APPVIEW = "https://api.bsky.app"
 PDS = os.environ.get("PDS_URL", "https://bsky.social")
@@ -30,6 +32,9 @@ ADMIN = os.environ.get("ADMIN_URL", "http://127.0.0.1:8081/label")
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL_S", "300"))
 IDENT = os.environ["BSKY_IDENTIFIER"]
 PW = os.environ["BSKY_APP_PASSWORD"]
+LABELER_DID = os.environ.get("LABELER_DID", "")
+# Set STARTER_PACK=1 to keep a "Top Chickens" starter pack synced with the alumni set.
+STARTER_PACK = os.environ.get("STARTER_PACK", "1") not in ("", "0", "false")
 
 CROWN_RE = re.compile(r"New Top Chicken!\s*@([\w.\-]+)'s post got ([\d,]+) likes")
 
@@ -211,6 +216,15 @@ def main():
                 print(f"reconciled: current={state['current'][:20]} "
                       f"record={state['record'][:20]} alumni={len(state['alumni'])} "
                       f"posts={len(state['winning_posts'])} new_labels={new}", flush=True)
+                # Keep the starter pack in sync (creates it once, appends new
+                # winners as they're crowned). Failures here never block labeling.
+                if STARTER_PACK and LABELER_DID:
+                    try:
+                        added = starterpack.sync(LABELER_DID, IDENT, PW, sorted(state["alumni"]))
+                        if added:
+                            print(f"starter pack: added {added} member(s)", flush=True)
+                    except Exception as e:
+                        print(f"starter pack sync error: {e}", flush=True)
         except Exception as e:
             print(f"poll error: {e}", flush=True)
         time.sleep(POLL_INTERVAL)

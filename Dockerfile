@@ -17,7 +17,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /out/labeler /app/labeler
-COPY config.template.yaml poller.py entrypoint.sh /app/
+COPY config.template.yaml poller.py starterpack.py entrypoint.sh /app/
 RUN chmod +x /app/entrypoint.sh
 ENV NODE_ENV=production
 ENTRYPOINT ["/app/entrypoint.sh"]
