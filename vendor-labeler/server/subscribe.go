@@ -22,7 +22,11 @@ import (
 // Subscribe returns HTTP handler that implements [com.atproto.label.subscribeLabels](https://github.com/bluesky-social/atproto/blob/main/lexicons/com/atproto/label/subscribeLabels.json) XRPC method.
 func (s *Server) Subscribe() http.Handler {
 	upgrader := &websocket.Upgrader{
-		EnableCompression: true,
+		// Compression disabled: Railway's edge proxy appears to break the
+		// permessage-deflate WebSocket upgrade for the AppView ingester (Vortex),
+		// causing it to connect and immediately disconnect before any labels
+		// transfer. Plain frames connect fine.
+		EnableCompression: false,
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +67,7 @@ func (s *Server) Subscribe() http.Handler {
 func (s *Server) streamLabels(ctx context.Context, conn *websocket.Conn, cursor int64, remoteAddr string) {
 	log := zerolog.Ctx(ctx)
 
-	conn.EnableWriteCompression(true)
+	conn.EnableWriteCompression(false)
 	defer conn.Close()
 
 	wakeCh := make(chan struct{}, 1)
