@@ -9,3 +9,5 @@ config.yaml
 .env.*
 setup.key
 *.key
+__pycache__/
+*.pyc
