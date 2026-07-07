@@ -66,6 +66,12 @@ GRACE_LIMIT = 7000
 JUDGE_DELAY_S = 12 * 3600
 ELIGIBLE_LOOKBACK_MAX_S = 36 * 3600
 ELIGIBLE_MAX_PAGES = 20     # safety cap per account
+# Eligible labels are only ever asserted on posts newer than cutoff_ts, so any
+# stranded label (one we asserted but lost track of) belongs to a post created
+# in [cutoff_ts − HEAL_WINDOW_S, cutoff_ts). Negating every top-level post in
+# that window each sweep cleans up stranded labels without relying solely on the
+# state file.
+HEAL_WINDOW_S = 24 * 3600
 
 
 def _req(url, token=None, method="GET", body=None):
@@ -319,13 +325,20 @@ def _filter_under_limit(dids):
     return eligible, unknown
 
 
-def _eligible_posts_for_did(did, cutoff_ts):
-    """Fetch top-level posts (no reply, no repost) within cutoff_ts for a single DID.
+def _eligible_posts_for_did(did, cutoff_ts, heal_floor_ts):
+    """Fetch top-level posts (no reply, no repost) for a single DID.
 
-    Returns list of {uri, cid} dicts, or raises on failure.
-    Stops paging once all posts on a page are older than the cutoff.
+    Returns (eligible, heal) where:
+      eligible — list of {uri, cid} with createdAt >= cutoff_ts (currently in-window)
+      heal     — list of {uri, cid} with createdAt in [heal_floor_ts, cutoff_ts)
+                 used to negate any stranded labels from a prior sweep window
+
+    Raises on network/API failure.
+    Pages until all non-repost items on a page are older than heal_floor_ts, or
+    ELIGIBLE_MAX_PAGES is reached.
     """
-    posts = []
+    eligible = []
+    heal = []
     cursor = None
     for _ in range(ELIGIBLE_MAX_PAGES):
         qs = {"actor": did, "limit": "100", "filter": "posts_with_replies"}
@@ -343,23 +356,26 @@ def _eligible_posts_for_did(did, cutoff_ts):
             if rec.get("reply"):
                 continue
             created_at = rec.get("createdAt", "")
+            uri = post.get("uri")
+            cid = post.get("cid")
+            if not uri or not cid:
+                continue
             if created_at >= cutoff_ts:
-                uri = post.get("uri")
-                cid = post.get("cid")
-                if uri and cid:
-                    posts.append({"uri": uri, "cid": cid})
-        # Stop paging when all non-repost items on this page are older than the
-        # cutoff — reverse-chronological ordering guarantees later pages are older.
+                eligible.append({"uri": uri, "cid": cid})
+            elif created_at >= heal_floor_ts:
+                heal.append({"uri": uri, "cid": cid})
+        # Stop paging when all non-repost items are older than the heal floor —
+        # reverse-chronological ordering guarantees later pages are even older.
         non_repost = [it for it in feed if not it.get("reason")]
         if non_repost and all(
-            (it.get("post", {}).get("record", {}).get("createdAt", "") or "") < cutoff_ts
+            (it.get("post", {}).get("record", {}).get("createdAt", "") or "") < heal_floor_ts
             for it in non_repost
         ):
             break
         cursor = d.get("cursor")
         if not cursor or not feed:
             break
-    return posts
+    return eligible, heal
 
 
 def eligible_cutoff(last_crowning_ts):
@@ -386,19 +402,28 @@ def eligible_sweep(last_crowning_ts):
     Returns (pool_size, eligible_accounts, posts_labeled, negated, new_labels, skipped).
     """
     cutoff_ts = eligible_cutoff(last_crowning_ts)
+    heal_floor_dt = (
+        datetime.datetime.strptime(cutoff_ts, "%Y-%m-%dT%H:%M:%S").replace(
+            tzinfo=datetime.timezone.utc)
+        - datetime.timedelta(seconds=HEAL_WINDOW_S)
+    )
+    heal_floor_ts = heal_floor_dt.strftime("%Y-%m-%dT%H:%M:%S")
 
     previous = _load_eligible_state()  # {uri: {cid, did}}
 
     pool = _get_pool_dids()
     eligible_dids, unknown_dids = _filter_under_limit(pool)
 
-    desired = {}   # {uri: {cid, did}}
+    desired = {}        # {uri: {cid, did}}
+    heal_posts = {}     # {uri: cid} — posts in [heal_floor_ts, cutoff_ts) to negate
     skipped = 0
     for did in eligible_dids:
         try:
-            posts = _eligible_posts_for_did(did, cutoff_ts)
-            for p in posts:
+            elig, heal = _eligible_posts_for_did(did, cutoff_ts, heal_floor_ts)
+            for p in elig:
                 desired[p["uri"]] = {"cid": p["cid"], "did": did}
+            for p in heal:
+                heal_posts[p["uri"]] = p["cid"]
         except Exception as e:
             print(f"  ! eligible fetch failed {did[:20]}: {e}", flush=True)
             skipped += 1
@@ -415,10 +440,13 @@ def eligible_sweep(last_crowning_ts):
             desired[uri] = info
 
     # Negations: URIs in previous but not in desired.
+    # Must pass cid — writeLabel matches on (src, val, uri, cid); without it
+    # the entry never matches and the negation silently becomes a no-op.
     to_negate = set(previous) - set(desired)
     failed_negate = set()
     for uri in to_negate:
-        if add_label(uri, L_ELIGIBLE, neg=True) is None:
+        cid = previous[uri]["cid"]
+        if add_label(uri, L_ELIGIBLE, neg=True, cid=cid) is None:
             # POST failed — keep in state so we retry next sweep.
             failed_negate.add(uri)
 
@@ -429,6 +457,18 @@ def eligible_sweep(last_crowning_ts):
         if result == 201:
             new_labels += 1
 
+    # Heal pass: negate every top-level post in [heal_floor_ts, cutoff_ts) with
+    # its cid. Posts currently in desired are skipped (still eligible). This
+    # cleans up labels stranded by a prior state-file loss or the cid-less
+    # negation bug. Negating a never-labeled post is a harmless no-op (200).
+    # Only count 201s (actual writes) so no-ops don't inflate the log counter.
+    healed = 0
+    for uri, cid in heal_posts.items():
+        if uri not in desired:
+            result = add_label(uri, L_ELIGIBLE, neg=True, cid=cid)
+            if result == 201:
+                healed += 1
+
     # New state = desired + any URIs whose negation failed.
     next_state = dict(desired)
     for uri in failed_negate:
@@ -436,6 +476,8 @@ def eligible_sweep(last_crowning_ts):
     _save_eligible_state(next_state)
 
     negated = len(to_negate) - len(failed_negate)
+    if healed:
+        print(f"  eligible heal: healed={healed}", flush=True)
     return len(pool), len(eligible_dids), len(desired), negated, new_labels, skipped
 
 
