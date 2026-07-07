@@ -1,9 +1,13 @@
 # CLAUDE.md — topchicken-labeler
 
-A Bluesky labeller that mirrors the "Top Chicken" meme crown into labels, built on
-the vendored off-the-shelf `bsky-watch/labeler` (Go) plus a small Python poller
-(`poller.py`). See `README.md` for the meme rules, label set, architecture, env
-vars, deploy, and the Railway-WebSocket-compression gotcha.
+A Bluesky labeller for the "Top Chicken" meme, built on the vendored
+off-the-shelf `bsky-watch/labeler` (Go) plus a Python poller (`poller.py`) with
+two loops: a crown **mirror** (announcer feeds → crown/alumni/record labels) and
+a computed **eligible sweep** (`top-chicken-eligible` on unjudged posts, with a
+state file on the volume for negation bookkeeping). See `README.md` for the meme
+rules, label set, architecture, env vars, deploy, and the two gotchas
+(cid-matched negations; Railway WebSocket compression). Design docs live in
+`docs/plans/` — update them in the same commit when implementation diverges.
 
 ## Push and merge policy
 

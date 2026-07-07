@@ -1,12 +1,14 @@
 # Top Chicken Labeller 🐔
 
 A Bluesky labeller that badges the reigning **Top Chicken**, the all-time record
-holder (**TipTop Chicken**), every account that's ever held the crown, and the
-specific winning posts. It also maintains a **Top Chickens starter pack**.
+holder (**TipTop Chicken**), every account that's ever held the crown, the
+specific winning posts, and every post **currently in the running** for the next
+crown. It also maintains a **Top Chickens starter pack**.
 
-It does **not** compute the crown itself — it mirrors the canonical
+It does **not** compute the crown itself — the crown labels mirror the canonical
 [@topchicken.bsky.social](https://bsky.app/profile/topchicken.bsky.social) feed
-and turns it into subscribable labels.
+and turn it into subscribable labels. The one exception is `top-chicken-eligible`,
+which is computed from our approximation of the meme rules (see Labels below).
 
 Subscribe: [topchicken-labeler.bsky.social](https://bsky.app/profile/topchicken-labeler.bsky.social)
 · Starter pack: [Top Chickens 🐔](https://bsky.app/starter-pack/topchicken-labeler.bsky.social/3moynae7xhi2e)
@@ -15,10 +17,13 @@ Subscribe: [topchicken-labeler.bsky.social](https://bsky.app/profile/topchicken-
 
 A Bluesky meme. Each day, one account earns the crown: the account under the
 **7,000-follower "Grace Limit"** whose post got the most likes. Each daily
-crowning judges posts with a "36 hour look back, 12 hour outcome" (per dave):
-posts created between 36h and 12h before judging — the 12h delay lets likes
-settle. The candidate pool is the announcer account's following + followers. It started from Grace ([@gracekind.net](https://bsky.app/profile/gracekind.net))
-saying "gm top chickens" in 2024.
+crowning judges posts with a "36 hour look back, 12 hour outcome" (per dave's
+description of his script): a crowning at time T judges posts created in
+`[T−36h, T−12h]` — the 12h delay lets likes settle before the outcome is
+called. The candidate pool is [@dave.9000ish.uk](https://bsky.app/profile/dave.9000ish.uk)'s
+following + followers (~750 accounts). It started from Grace
+([@gracekind.net](https://bsky.app/profile/gracekind.net)) saying "gm top
+chickens" in 2024.
 
 The crown is announced publicly by two accounts in sequence, which post
 `🐔 New Top Chicken! @handle's post got N likes.` with the winner's DID embedded
@@ -48,6 +53,15 @@ DIDs (not handles) are the identity key throughout, pulled from the announcement
 mention facets — self-healing across handle renames (e.g. `codetard.bsky.social`
 → `vibe-coded.com` is one DID, one alumnus).
 
+`top-chicken-eligible` is the odd one out: it's **computed, not mirrored**, from
+our approximation of the rules — a top-level post (no replies; reposts skipped;
+quote posts count) with `createdAt > last crowning − 12h` (not yet judged),
+floored at `now − 36h`, by a pool account under the Grace Limit at sweep time.
+It's asserted while the post is in the running and negated once a crowning has
+judged it, so expect roughly 500–800 live at any moment and edge-case divergence
+from whatever dave's script actually does. Design history:
+`docs/plans/2026-07-07-eligible-post-labels.md`.
+
 ## Architecture
 
 Built on the off-the-shelf **[bsky-watch/labeler](https://github.com/bsky-watch/labeler)**
@@ -62,18 +76,21 @@ One Railway service, single replica, two processes (see `entrypoint.sh`):
    `com.atproto.label.queryLabels` + `subscribeLabels` on `$PORT`, persists to
    SQLite on the volume, publishes/refreshes the label definitions at startup,
    and exposes a localhost-only `POST /label` admin API.
-2. **`poller.py`** — reads the announcer feeds every `POLL_INTERVAL_S`, derives
-   the label state (current / record / alumni / winning posts), and POSTs labels
-   to the admin API. Idempotent: it re-asserts the full desired state each cycle
-   (re-POSTing an unchanged label is a no-op). Also keeps the starter pack synced.
-   On a separate slower cadence (`ELIGIBLE_SWEEP_INTERVAL_S`, default 20 min),
-   the poller sweeps the candidate pool (followers+follows of `POOL_ACTOR`) to
-   find all top-level posts not yet judged in a crowning — newer than
-   `last crowning − 12h`, floored at `now − 36h` — from accounts below the Grace
-   Limit, and asserts `top-chicken-eligible` on each. This label is computed from
-   approximated rules rather than mirrored from the announcer. A state file on the
-   volume (`ELIGIBLE_STATE_PATH`) tracks the currently-labeled URIs across restarts
-   so the poller can negate labels once posts are judged.
+2. **`poller.py`** — two reconcile loops in one process:
+   - **Crown mirror** (every `POLL_INTERVAL_S`, default 5 min): reads the
+     announcer feeds, derives current / record / alumni / winning posts, POSTs
+     labels to the admin API. Idempotent — it re-asserts the full desired state
+     each cycle (re-POSTing an unchanged label is a no-op). Also keeps the
+     starter pack synced.
+   - **Eligible sweep** (every `ELIGIBLE_SWEEP_INTERVAL_S`, default 20 min):
+     pages the pool graph (~700 AppView requests/sweep, hence the slower
+     cadence), asserts `top-chicken-eligible` on unjudged posts, and negates
+     labels on posts a crowning has judged. Negation needs to know what was
+     previously asserted, so this loop keeps a state file on the volume
+     (`ELIGIBLE_STATE_PATH`, `{uri: {cid, did}}`). A per-sweep **heal pass**
+     also re-negates every pool post in the 24h before the eligibility cutoff —
+     a no-op for never-labeled posts — so labels stranded by a lost state file
+     or a past bug self-clean within one sweep.
 
 State lives on the Railway **volume** (`DB_PATH`, default
 `$RAILWAY_VOLUME_MOUNT_PATH/bw-labels.sqlite`). **Single replica is required** —
@@ -83,12 +100,13 @@ writer / one cursor sequence anyway.
 ## Source layout
 
 ```
-poller.py             our logic: read feeds → derive state → POST labels + sync pack
+poller.py             our logic: crown mirror + eligible sweep → POST labels + sync pack
 starterpack.py        keep the "Top Chickens" starter pack in sync with alumni
 config.template.yaml  labeler config, env-substituted at container start
 entrypoint.sh         render config, run labeler + poller in one container
 Dockerfile            build the Go labeler (Go 1.23) + Python runtime
 railway.json          single replica, healthcheck on queryLabels
+docs/plans/           design docs (dated; treat as source of truth for the why)
 vendor-labeler/       bsky-watch/labeler, vendored (upstream bf2d37a, +1 patch)
 ```
 
@@ -138,6 +156,19 @@ To stand up from scratch (or on a fresh account):
 The poller backfills all historical alumni + the current state automatically on
 first run; there is no separate backfill step.
 
+## Gotcha: negations must carry the same `cid` as the assertion
+
+The bsky-watch admin API matches the entry to negate on **`(src, val, uri, cid)`
+exactly** (`vendor-labeler/server/core_logic.go`, `writeLabel`). If a label was
+asserted with a `cid` (as all our post-level labels are), a negation POST
+without one matches nothing, takes the "nothing to negate" branch, and returns
+**200 as if it succeeded** — the label stays served, invisibly stranded.
+`queryLabels`' negation-suppression is keyed by `cid` too. Rule: **whatever you
+assert with, negate with.** Account-DID labels carry no cid, so both sides are
+bare and this never bites; it's specific to post labels. Bit us on day one of
+`top-chicken-eligible` (365 stranded labels); the sweep's heal pass now makes
+this class of stranding self-correcting.
+
 ## Gotcha: labels not showing in the AppView (Railway + WebSockets)
 
 The Bluesky AppView ingests third-party labels via **Vortex**, which opens a
@@ -161,6 +192,9 @@ Verify our side independently of the AppView:
 curl "https://api.bsky.app/xrpc/app.bsky.labeler.getServices?dids=<LABELER_DID>&detailed=true"
 # labels served + signed
 curl "https://<host>/xrpc/com.atproto.label.queryLabels?uriPatterns=<subject-did>"
+# post-level labels: exact at:// URI only — bsky-watch rejects wildcard
+# patterns like at://* or at://did:.../app.bsky.feed.post/* ("unsupported pattern")
+curl "https://<host>/xrpc/com.atproto.label.queryLabels?uriPatterns=<at://did/app.bsky.feed.post/rkey>"
 ```
 
 If those return labels but a profile (with `atproto-accept-labelers`) doesn't, the

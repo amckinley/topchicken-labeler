@@ -1,12 +1,14 @@
 # Eligible-post labels (`top-chicken-eligible`)
 
-2026-07-07. Status: agreed, ready to implement.
+2026-07-07. Status: **shipped** (same day, three commits: initial 24h-window
+version → corrected eligibility window per dave → cid-negation fix + heal
+pass). Updated post-ship to match what runs in production.
 
 ## Goal
 
 Today the labeler only mirrors *outcomes* (crownings). Add a record-level label
-on every post that is **currently eligible to win** Top Chicken: a top-level
-post from the last 24 hours by an account in the candidate pool that is under
+on every post that is **currently eligible to win** Top Chicken: an unjudged
+top-level post by an account in the candidate pool that is under
 the 7,000-follower Grace Limit. Users who find it noisy can hide the badge
 per-label in app settings; that's why we're doing the full version rather than
 a front-runner-only label.
@@ -69,6 +71,16 @@ single-threaded main loop (track `last_sweep` timestamp; no threads):
    Negate `previous − desired`; assert every member of `desired` (idempotent,
    same `add_label` path, include `cid`). Write state file = `desired` ∪
    (any URIs whose negation POST failed, so they're retried next sweep).
+5. **Heal pass** (added after the cid-negation bug, see Postscript): negate
+   (with cid) every pool post created in `[cutoff − 24h, cutoff)` that isn't
+   in `desired`. Negating a never-labeled post is a server-side no-op, so this
+   runs every sweep. Since eligible labels are only ever asserted on posts
+   newer than the cutoff, any stranded label is caught here within one sweep
+   of the cutoff moving past it — regardless of state-file integrity.
+
+**Negations must carry the same `cid` as the assertion** — the bsky-watch
+`writeLabel` matches on `(src, val, uri, cid)` exactly and returns a
+success-looking 200 no-op when nothing matches. See README gotcha.
 
 ### State file
 
@@ -78,12 +90,11 @@ volume (`ELIGIBLE_STATE_PATH`, default
 labeled. Needed because negation requires knowing what we asserted last sweep,
 and it must survive restarts (an in-memory set would strand stale labels after
 every deploy). Write atomically (temp file + rename). A missing file (first run) means `previous` = empty; a corrupt or
-unreadable file aborts the sweep rather than overwriting the file, because
-losing the state means aged-out labels are stranded *forever* — `desired` is
-recomputed from the live feed each sweep, so nothing ever rediscovers a
-stale label to negate it. After a genuine volume wipe, recovery would mean
-reconstructing `previous` from `queryLabels`; accepted as a manual step for
-an event that shouldn't happen.
+unreadable file aborts the sweep rather than overwriting the file. The heal
+pass (above) has since demoted state-file loss from "labels stranded forever,
+manual queryLabels reconstruction" to "cleaned automatically within one sweep"
+— the file now mainly serves the fast path and the carry-over-on-flaky-fetch
+protections.
 
 ### Cadence and rate limiting
 
@@ -129,3 +140,18 @@ admin API); no separate backfill step, matching the existing pattern.
   `likeCount`-free data, a contender label would need likes too).
 - Computing or predicting the crown itself; the mirror remains canonical.
 - Retroactively labeling historical eligible posts.
+
+## Postscript: what changed between plan and production (all 2026-07-07)
+
+1. **Eligibility window corrected.** Planned as trailing-24h; dave's actual
+   rule (via DM) is "36 hour look back, 12 hour outcome," i.e. eligible ⇔ not
+   yet judged: `createdAt > last_crowning − 12h`, floored at `now − 36h`. The
+   crown mirror now feeds its latest crowning timestamp to the sweep. Steady
+   state is ~500–800 live labels, not the ~800/day-window figure above.
+2. **cid-negation bug.** First production sweep "negated" 365 stale labels as
+   silent 200 no-ops (assert carried cid, negate didn't; `writeLabel` matches
+   on the full tuple) and dropped them from state — stranded. Fix: negate with
+   the stored cid, plus the heal pass, which cleaned all 365 on its first
+   sweep (verified via a sentinel post disappearing from `queryLabels`).
+3. Verified end-to-end against a local labeler binary + scratch SQLite:
+   negate-without-cid leaves the label served; negate-with-cid suppresses it.

@@ -18,6 +18,11 @@ The bsky-watch admin API is declarative-ish: POST {uri, val} adds a label, POST
 {uri, val, neg:true} negates it. It dedupes (returns 200 vs 201), so re-POSTing a
 label already present is a harmless no-op — which makes the poller naturally
 idempotent and lets us just re-assert the full desired state each cycle.
+
+CAUTION: the server matches the entry to negate on (src, val, uri, cid) exactly,
+and returns 200 (as if deduped) when nothing matches. A negation must therefore
+carry the same cid the assertion did, or it silently does nothing — see the
+"negations must carry the same cid" gotcha in README.md.
 """
 import datetime
 import json
