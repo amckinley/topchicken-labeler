@@ -41,6 +41,7 @@ alum badge. All at severity `inform` (neutral badge, no blur).
 | `tiptop-chicken` | TipTop Chicken 👑 | account DID | highest all-time score ever (moves only when the record is broken) |
 | `top-chicken-alumni` | Top Chicken Alum | account DID | has held the crown before (and isn't currently 🐔/👑) |
 | `top-chicken-post` | Top Chicken Post 🥇 | post URI | the specific post that won a daily crown |
+| `top-chicken-eligible` | Top Chicken Eligible 🐣 | post URI | currently eligible to win — top-level post under 24h old by an under-limit pool account (transient) |
 
 DIDs (not handles) are the identity key throughout, pulled from the announcement
 mention facets — self-healing across handle renames (e.g. `codetard.bsky.social`
@@ -64,6 +65,13 @@ One Railway service, single replica, two processes (see `entrypoint.sh`):
    the label state (current / record / alumni / winning posts), and POSTs labels
    to the admin API. Idempotent: it re-asserts the full desired state each cycle
    (re-POSTing an unchanged label is a no-op). Also keeps the starter pack synced.
+   On a separate slower cadence (`ELIGIBLE_SWEEP_INTERVAL_S`, default 20 min),
+   the poller sweeps the candidate pool (followers+follows of `POOL_ACTOR`) to
+   find all top-level posts under 24h old from accounts below the Grace Limit, and
+   asserts `top-chicken-eligible` on each. This label is computed from approximated
+   rules rather than mirrored from the announcer. A state file on the volume
+   (`ELIGIBLE_STATE_PATH`) tracks the currently-labeled URIs across restarts so the
+   poller can negate labels when posts age out.
 
 State lives on the Railway **volume** (`DB_PATH`, default
 `$RAILWAY_VOLUME_MOUNT_PATH/bw-labels.sqlite`). **Single replica is required** —
@@ -100,6 +108,10 @@ WebSocket compression is disabled (see the gotcha below).
 | `POLL_INTERVAL_S` | no | `300` | how often to poll the feed (seconds) |
 | `DB_PATH` | no | `$RAILWAY_VOLUME_MOUNT_PATH/bw-labels.sqlite` | SQLite label store |
 | `STARTER_PACK` | no | `1` | sync the Top Chickens starter pack (`0` to disable) |
+| `ELIGIBLE_POSTS` | no | `1` | enable the eligible-post sweep (`0` to disable) |
+| `ELIGIBLE_SWEEP_INTERVAL_S` | no | `1200` | sweep cadence (seconds) |
+| `POOL_ACTOR` | no | `dave.9000ish.uk` | account whose graph defines the candidate pool |
+| `ELIGIBLE_STATE_PATH` | no | `$RAILWAY_VOLUME_MOUNT_PATH/eligible-posts.json` | asserted-URIs state file for eligible-post sweep |
 
 The signing key and app password live only in Railway env vars — never committed.
 The config template is rendered at container start (`config.yaml` is gitignored).

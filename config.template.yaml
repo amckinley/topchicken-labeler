@@ -51,3 +51,12 @@ labels:
         - lang: en
           name: "Top Chicken Post \U0001F947"
           description: "This is the post that won the Top Chicken crown for the day — the most-liked post in its 24h window."
+    - identifier: top-chicken-eligible
+      severity: inform
+      blurs: none
+      defaultsetting: warn
+      adultonly: false
+      locales:
+        - lang: en
+          name: "Top Chicken Eligible \U0001F423"
+          description: "This post is currently in the running for Top Chicken: posted in the last 24 hours by an account under the 7,000-follower Grace Limit."
