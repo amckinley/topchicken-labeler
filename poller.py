@@ -12,7 +12,7 @@ on post URIs):
   tiptop-chicken        all-time record holder      (single; moved by negation)
   top-chicken-post      the specific winning post   (record-level, sticky)
   top-chicken-eligible  currently in the running    (record-level, transient; negated
-                        when the post ages out of the 24h window)
+                        once the post has been judged in a daily crowning)
 
 The bsky-watch admin API is declarative-ish: POST {uri, val} adds a label, POST
 {uri, val, neg:true} negates it. It dedupes (returns 200 vs 201), so re-POSTing a
@@ -59,7 +59,12 @@ L_POST = "top-chicken-post"
 L_ELIGIBLE = "top-chicken-eligible"
 
 GRACE_LIMIT = 7000
-ELIGIBLE_WINDOW_S = 86400   # 24h
+# Crowning at time T judges posts created in [T-36h, T-12h] ("36 hour look back,
+# 12 hour outcome" — the 12h delay lets likes settle). So a post is still in the
+# running iff it's newer than last_crowning - 12h. The 36h floor bounds the
+# window if the announcer goes quiet.
+JUDGE_DELAY_S = 12 * 3600
+ELIGIBLE_LOOKBACK_MAX_S = 36 * 3600
 ELIGIBLE_MAX_PAGES = 20     # safety cap per account
 
 
@@ -165,6 +170,7 @@ def build_state(token):
         "record": record_did,
         "winning_posts": winning_posts,
         "all_dids": alumni,
+        "last_crowning_ts": deduped[-1][0],
     }
 
 
@@ -356,14 +362,30 @@ def _eligible_posts_for_did(did, cutoff_ts):
     return posts
 
 
-def eligible_sweep():
-    """Assert top-chicken-eligible on all in-window top-level posts from pool accounts.
+def eligible_cutoff(last_crowning_ts):
+    """Oldest createdAt still in the running, as an ISO string for lexicographic
+    comparison with record timestamps.
+
+    A crowning at T judged posts from [T-36h, T-12h], so anything newer than
+    T-12h is still unjudged and eligible for a future crown. Floor at now-36h
+    in case the announcer stalls (no post older than a full lookback can win)."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    floor = now - datetime.timedelta(seconds=ELIGIBLE_LOOKBACK_MAX_S)
+    floor_ts = floor.strftime("%Y-%m-%dT%H:%M:%S")
+    if not last_crowning_ts:
+        return floor_ts
+    crowning = datetime.datetime.strptime(last_crowning_ts, "%Y-%m-%dT%H:%M:%S").replace(
+        tzinfo=datetime.timezone.utc)
+    judged_ts = (crowning - datetime.timedelta(seconds=JUDGE_DELAY_S)).strftime("%Y-%m-%dT%H:%M:%S")
+    return max(judged_ts, floor_ts)
+
+
+def eligible_sweep(last_crowning_ts):
+    """Assert top-chicken-eligible on all unjudged top-level posts from pool accounts.
 
     Returns (pool_size, eligible_accounts, posts_labeled, negated, new_labels, skipped).
     """
-    cutoff_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ELIGIBLE_WINDOW_S)
-    # ISO 8601 string for lexicographic comparison with createdAt values.
-    cutoff_ts = cutoff_dt.strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff_ts = eligible_cutoff(last_crowning_ts)
 
     previous = _load_eligible_state()  # {uri: {cid, did}}
 
@@ -420,6 +442,7 @@ def eligible_sweep():
 def main():
     print(f"top chicken poller starting; admin={ADMIN} interval={POLL_INTERVAL}s", flush=True)
     last_eligible_sweep = 0.0
+    last_crowning_ts = None
     while True:
         try:
             token = login()
@@ -427,6 +450,7 @@ def main():
             if not state:
                 print("no crownings found", flush=True)
             else:
+                last_crowning_ts = state["last_crowning_ts"]
                 new = reconcile(state)
                 print(f"reconciled: current={state['current'][:20]} "
                       f"record={state['record'][:20]} alumni={len(state['alumni'])} "
@@ -446,7 +470,7 @@ def main():
         # crown mirror above.
         if ELIGIBLE_POSTS and time.monotonic() - last_eligible_sweep >= ELIGIBLE_SWEEP_INTERVAL_S:
             try:
-                pool_sz, elig_accts, posts_lbl, negated, new_lbl, skipped = eligible_sweep()
+                pool_sz, elig_accts, posts_lbl, negated, new_lbl, skipped = eligible_sweep(last_crowning_ts)
                 print(
                     f"eligible sweep: pool={pool_sz} eligible_accounts={elig_accts} "
                     f"posts={posts_lbl} negated={negated} new={new_lbl} skipped={skipped}",

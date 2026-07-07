@@ -21,7 +21,12 @@ are approximated from the announcer's behavior, not from dave's actual script;
   fetched live each sweep. DIDs are the identity key, as everywhere else.
 - **Grace Limit**: author has `followersCount < 7000` at sweep time
   (`app.bsky.actor.getProfiles`, batches of 25).
-- **Post window**: `record.createdAt` within the last 24h at sweep time.
+- **Post window**: per dave (DM, 2026-07-07): "36 hour look back. 12 hour
+  outcome." A crowning at time T judges posts created in `[T−36h, T−12h]`.
+  So a post is eligible iff `createdAt > last_crowning − 12h` (not yet judged),
+  floored at `now − 36h` (older than a full lookback can never win, even if
+  the announcer stalls). The original 24h-window guess shipped first and was
+  corrected same-day.
 - **Top-level posts only**: no replies (records with a `reply` field are out),
   no reposts (feed items with a `reason` are out). Quote posts count.
 - A post that won the crown keeps its transient `top-chicken-eligible` label

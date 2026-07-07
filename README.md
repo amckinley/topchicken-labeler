@@ -14,9 +14,10 @@ Subscribe: [topchicken-labeler.bsky.social](https://bsky.app/profile/topchicken-
 ## What's a Top Chicken?
 
 A Bluesky meme. Each day, one account earns the crown: the account under the
-**7,000-follower "Grace Limit"** whose post got the most likes in a rolling 24h
-window (evaluated with a ~12h delay). The candidate pool is the tracker's
-following + followers. It started from Grace ([@gracekind.net](https://bsky.app/profile/gracekind.net))
+**7,000-follower "Grace Limit"** whose post got the most likes. Each daily
+crowning judges posts with a "36 hour look back, 12 hour outcome" (per dave):
+posts created between 36h and 12h before judging — the 12h delay lets likes
+settle. The candidate pool is the announcer account's following + followers. It started from Grace ([@gracekind.net](https://bsky.app/profile/gracekind.net))
 saying "gm top chickens" in 2024.
 
 The crown is announced publicly by two accounts in sequence, which post
@@ -41,7 +42,7 @@ alum badge. All at severity `inform` (neutral badge, no blur).
 | `tiptop-chicken` | TipTop Chicken 👑 | account DID | highest all-time score ever (moves only when the record is broken) |
 | `top-chicken-alumni` | Top Chicken Alum | account DID | has held the crown before (and isn't currently 🐔/👑) |
 | `top-chicken-post` | Top Chicken Post 🥇 | post URI | the specific post that won a daily crown |
-| `top-chicken-eligible` | Top Chicken Eligible 🐣 | post URI | currently eligible to win — top-level post under 24h old by an under-limit pool account (transient) |
+| `top-chicken-eligible` | Top Chicken Eligible 🐣 | post URI | currently eligible to win — unjudged top-level post by an under-limit pool account (transient) |
 
 DIDs (not handles) are the identity key throughout, pulled from the announcement
 mention facets — self-healing across handle renames (e.g. `codetard.bsky.social`
@@ -67,11 +68,12 @@ One Railway service, single replica, two processes (see `entrypoint.sh`):
    (re-POSTing an unchanged label is a no-op). Also keeps the starter pack synced.
    On a separate slower cadence (`ELIGIBLE_SWEEP_INTERVAL_S`, default 20 min),
    the poller sweeps the candidate pool (followers+follows of `POOL_ACTOR`) to
-   find all top-level posts under 24h old from accounts below the Grace Limit, and
-   asserts `top-chicken-eligible` on each. This label is computed from approximated
-   rules rather than mirrored from the announcer. A state file on the volume
-   (`ELIGIBLE_STATE_PATH`) tracks the currently-labeled URIs across restarts so the
-   poller can negate labels when posts age out.
+   find all top-level posts not yet judged in a crowning — newer than
+   `last crowning − 12h`, floored at `now − 36h` — from accounts below the Grace
+   Limit, and asserts `top-chicken-eligible` on each. This label is computed from
+   approximated rules rather than mirrored from the announcer. A state file on the
+   volume (`ELIGIBLE_STATE_PATH`) tracks the currently-labeled URIs across restarts
+   so the poller can negate labels once posts are judged.
 
 State lives on the Railway **volume** (`DB_PATH`, default
 `$RAILWAY_VOLUME_MOUNT_PATH/bw-labels.sqlite`). **Single replica is required** —
